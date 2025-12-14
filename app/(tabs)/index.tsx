@@ -1,98 +1,269 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { TransactionData, TransactionModal } from '@/components/ui/AddTransactionModal';
+import { BudgetHeader } from '@/components/ui/BudgetHeader';
+import { Card } from '@/components/ui/Card';
+import { TransactionRow } from '@/components/ui/TransactionRow';
+import { Colors } from '@/constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+
+type Transaction = {
+  id: string;
+  title: string;
+  subtitle: string;
+  amount: number;
+  iconName: keyof typeof Ionicons.glyphMap;
+  iconColor: string;
+  date: string;
+};
+
+const MONTHLY_BUDGET = 2500; // This could be user-configurable later
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const colorScheme = useColorScheme();
+  const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<TransactionData | null>(null);
+  const [scrollY, setScrollY] = useState(0);
+  const [transactions, setTransactions] = useState<Transaction[]>([
+    { id: '1', title: 'Whole Foods', subtitle: 'Groceries', amount: -64.20, iconName: 'cart', iconColor: '#FF9500', date: 'Today' },
+    { id: '2', title: 'Starbucks', subtitle: 'Coffee', amount: -5.40, iconName: 'cafe', iconColor: '#AF52DE', date: 'Today' },
+    { id: '3', title: 'Uber', subtitle: 'Transport', amount: -14.90, iconName: 'car', iconColor: '#5AC8FA', date: 'Today' },
+    { id: '4', title: 'Netflix', subtitle: 'Shopping', amount: -12.00, iconName: 'film', iconColor: '#34C759', date: 'Yesterday' },
+    { id: '5', title: 'Gym', subtitle: 'Health', amount: -20.00, iconName: 'fitness', iconColor: '#5856D6', date: 'Yesterday' },
+  ]);
+
+  // Calculate total spent
+  const totalSpent = useMemo(() => {
+    return transactions.reduce((sum, t) => sum + t.amount, 0);
+  }, [transactions]);
+
+  // Calculate category breakdown for insights
+  const categoryBreakdown = useMemo(() => {
+    const categoryMap = new Map<string, { amount: number; color: string }>();
+
+    transactions.forEach(t => {
+      const existing = categoryMap.get(t.subtitle);
+      if (existing) {
+        existing.amount += Math.abs(t.amount);
+      } else {
+        categoryMap.set(t.subtitle, { amount: Math.abs(t.amount), color: t.iconColor });
+      }
+    });
+
+    return Array.from(categoryMap.entries())
+      .map(([name, data]) => ({ name, amount: data.amount, color: data.color }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [transactions]);
+
+  const handleSaveTransaction = (transaction: TransactionData) => {
+    if (transaction.id) {
+      // Edit existing transaction
+      setTransactions(prev => prev.map(t =>
+        t.id === transaction.id
+          ? {
+            ...t,
+            title: transaction.title,
+            subtitle: transaction.category,
+            amount: transaction.amount,
+            iconName: transaction.iconName as keyof typeof Ionicons.glyphMap,
+            iconColor: transaction.iconColor,
+          }
+          : t
+      ));
+    } else {
+      // Add new transaction
+      const newTransaction: Transaction = {
+        id: Date.now().toString(),
+        title: transaction.title,
+        subtitle: transaction.category,
+        amount: transaction.amount,
+        iconName: transaction.iconName as keyof typeof Ionicons.glyphMap,
+        iconColor: transaction.iconColor,
+        date: 'Today',
+      };
+      setTransactions(prev => [newTransaction, ...prev]);
+    }
+    setEditingTransaction(null);
+  };
+
+  const handleDeleteTransaction = (id: string) => {
+    setTransactions(prev => prev.filter(t => t.id !== id));
+    setEditingTransaction(null);
+  };
+
+  const handleEditTransaction = (transaction: Transaction) => {
+    setEditingTransaction({
+      id: transaction.id,
+      title: transaction.title,
+      amount: transaction.amount,
+      category: transaction.subtitle,
+      iconName: transaction.iconName,
+      iconColor: transaction.iconColor,
+    });
+    setIsModalVisible(true);
+  };
+
+  const handleAddNew = () => {
+    setEditingTransaction(null);
+    setIsModalVisible(true);
+  };
+
+  const todayTransactions = transactions.filter(t => t.date === 'Today');
+  const yesterdayTransactions = transactions.filter(t => t.date === 'Yesterday');
+
+  const todayTotal = todayTransactions.reduce((sum, t) => sum + t.amount, 0);
+  const yesterdayTotal = yesterdayTransactions.reduce((sum, t) => sum + t.amount, 0);
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* Single ScrollView - Everything scrolls together (Cards Pattern) */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.scrollContent}
+        onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={true}
+      >
+        {/* Card 1: Header with Tabs + Chart */}
+        <BudgetHeader
+          monthlyBudget={MONTHLY_BUDGET}
+          totalSpent={totalSpent}
+          categoryBreakdown={categoryBreakdown}
+          scrollY={scrollY}
+        />
+
+        {/* Card 2: Today's Transactions */}
+        {todayTransactions.length > 0 && (
+          <Card>
+            <View style={styles.cardHeader}>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>Today</Text>
+              <Text style={[styles.cardTotal, { color: theme.expense }]}>
+                -${Math.abs(todayTotal).toFixed(2)}
+              </Text>
+            </View>
+
+            {todayTransactions.map((transaction, index) => (
+              <TouchableOpacity
+                key={transaction.id}
+                onPress={() => handleEditTransaction(transaction)}
+                activeOpacity={0.7}
+              >
+                <TransactionRow
+                  title={transaction.title}
+                  subtitle={transaction.subtitle}
+                  amount={transaction.amount}
+                  iconName={transaction.iconName}
+                  iconColor={transaction.iconColor}
+                />
+                {index < todayTransactions.length - 1 && (
+                  <View style={[styles.separator, { backgroundColor: theme.separator }]} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </Card>
+        )}
+
+        {/* Yesterday's Transactions */}
+        {yesterdayTransactions.length > 0 && (
+          <Card>
+            <View style={styles.cardHeader}>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>Yesterday</Text>
+              <Text style={[styles.cardTotal, { color: theme.expense }]}>
+                -${Math.abs(yesterdayTotal).toFixed(2)}
+              </Text>
+            </View>
+
+            {yesterdayTransactions.map((transaction, index) => (
+              <TouchableOpacity
+                key={transaction.id}
+                onPress={() => handleEditTransaction(transaction)}
+                activeOpacity={0.7}
+              >
+                <TransactionRow
+                  title={transaction.title}
+                  subtitle={transaction.subtitle}
+                  amount={transaction.amount}
+                  iconName={transaction.iconName}
+                  iconColor={transaction.iconColor}
+                />
+                {index < yesterdayTransactions.length - 1 && (
+                  <View style={[styles.separator, { backgroundColor: theme.separator }]} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </Card>
+        )}
+      </ScrollView>
+
+      {/* Floating Action Button */}
+      <TouchableOpacity
+        style={[styles.fab, { backgroundColor: theme.tint }]}
+        onPress={handleAddNew}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="add" size={32} color="#FFFFFF" />
+      </TouchableOpacity>
+
+      {/* Transaction Modal (Add/Edit) */}
+      <TransactionModal
+        visible={isModalVisible}
+        onClose={() => {
+          setIsModalVisible(false);
+          setEditingTransaction(null);
+        }}
+        onSave={handleSaveTransaction}
+        onDelete={handleDeleteTransaction}
+        editTransaction={editingTransaction}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  cardHeader: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 8,
+    marginBottom: 16,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
+  cardTotal: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  separator: {
+    height: 1,
+    marginLeft: 56,
+    marginVertical: 4,
+  },
+  fab: {
     position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
 });
