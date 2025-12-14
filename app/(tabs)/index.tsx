@@ -1,202 +1,239 @@
-import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  FlatList,
+  ListRenderItem,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useColorScheme,
+  View,
+} from 'react-native';
 
-import { TransactionData, TransactionModal } from '@/components/ui/AddTransactionModal';
+import { TransactionModal } from '@/components/ui/AddTransactionModal';
 import { BudgetHeader } from '@/components/ui/BudgetHeader';
 import { Card } from '@/components/ui/Card';
 import { TransactionRow } from '@/components/ui/TransactionRow';
 import { Colors } from '@/constants/theme';
+import { Transaction, useBudget } from '@/context/BudgetContext';
 import { Ionicons } from '@expo/vector-icons';
 
-type Transaction = {
-  id: string;
-  title: string;
-  subtitle: string;
-  amount: number;
-  iconName: keyof typeof Ionicons.glyphMap;
-  iconColor: string;
-  date: string;
-};
+// ============================================================================
+// TYPES
+// ============================================================================
 
-const MONTHLY_BUDGET = 2500; // This could be user-configurable later
+interface TransactionGroup {
+  date: string;
+  displayDate: string;
+  transactions: Transaction[];
+  total: number;
+}
+
+// ============================================================================
+// DATE HELPERS
+// ============================================================================
+
+function getDateString(date: Date): string {
+  return date.toISOString().split('T')[0];
+}
+
+function formatDisplayDate(dateString: string): string {
+  const today = getDateString(new Date());
+  const yesterday = getDateString(new Date(Date.now() - 86400000));
+
+  if (dateString === today) return 'Today';
+  if (dateString === yesterday) return 'Yesterday';
+
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric'
+  });
+}
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
+  const {
+    budget,
+    transactions,
+    categories,
+    totalSpent,
+    categoryBreakdown,
+    getCategoryById,
+    deleteTransaction,
+  } = useBudget();
+
+  // UI State
   const [isModalVisible, setIsModalVisible] = useState(false);
-  const [editingTransaction, setEditingTransaction] = useState<TransactionData | null>(null);
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const [scrollY, setScrollY] = useState(0);
-  const [transactions, setTransactions] = useState<Transaction[]>([
-    { id: '1', title: 'Whole Foods', subtitle: 'Groceries', amount: -64.20, iconName: 'cart', iconColor: '#FF9500', date: 'Today' },
-    { id: '2', title: 'Starbucks', subtitle: 'Coffee', amount: -5.40, iconName: 'cafe', iconColor: '#AF52DE', date: 'Today' },
-    { id: '3', title: 'Uber', subtitle: 'Transport', amount: -14.90, iconName: 'car', iconColor: '#5AC8FA', date: 'Today' },
-    { id: '4', title: 'Netflix', subtitle: 'Shopping', amount: -12.00, iconName: 'film', iconColor: '#34C759', date: 'Yesterday' },
-    { id: '5', title: 'Gym', subtitle: 'Health', amount: -20.00, iconName: 'fitness', iconColor: '#5856D6', date: 'Yesterday' },
-  ]);
 
-  // Calculate total spent
-  const totalSpent = useMemo(() => {
-    return transactions.reduce((sum, t) => sum + t.amount, 0);
-  }, [transactions]);
+  // Refs for performance
+  const scrollYRef = useRef(0);
 
-  // Calculate category breakdown for insights
-  const categoryBreakdown = useMemo(() => {
-    const categoryMap = new Map<string, { amount: number; color: string }>();
+  // ========================================================================
+  // MEMOIZED DATA
+  // ========================================================================
 
-    transactions.forEach(t => {
-      const existing = categoryMap.get(t.subtitle);
-      if (existing) {
-        existing.amount += Math.abs(t.amount);
-      } else {
-        categoryMap.set(t.subtitle, { amount: Math.abs(t.amount), color: t.iconColor });
-      }
+  // Group transactions by date
+  const transactionGroups = useMemo((): TransactionGroup[] => {
+    const groups = new Map<string, Transaction[]>();
+
+    // Sort transactions by createdAt (newest first)
+    const sorted = [...transactions].sort((a, b) => b.createdAt - a.createdAt);
+
+    sorted.forEach(t => {
+      const existing = groups.get(t.date) || [];
+      existing.push(t);
+      groups.set(t.date, existing);
     });
 
-    return Array.from(categoryMap.entries())
-      .map(([name, data]) => ({ name, amount: data.amount, color: data.color }))
-      .sort((a, b) => b.amount - a.amount);
+    return Array.from(groups.entries())
+      .map(([date, txs]) => ({
+        date,
+        displayDate: formatDisplayDate(date),
+        transactions: txs,
+        total: txs.reduce((sum, t) => sum + t.amount, 0),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date)); // Newest date first
   }, [transactions]);
 
-  const handleSaveTransaction = (transaction: TransactionData) => {
-    if (transaction.id) {
-      // Edit existing transaction
-      setTransactions(prev => prev.map(t =>
-        t.id === transaction.id
-          ? {
-            ...t,
-            title: transaction.title,
-            subtitle: transaction.category,
-            amount: transaction.amount,
-            iconName: transaction.iconName as keyof typeof Ionicons.glyphMap,
-            iconColor: transaction.iconColor,
-          }
-          : t
-      ));
-    } else {
-      // Add new transaction
-      const newTransaction: Transaction = {
-        id: Date.now().toString(),
-        title: transaction.title,
-        subtitle: transaction.category,
-        amount: transaction.amount,
-        iconName: transaction.iconName as keyof typeof Ionicons.glyphMap,
-        iconColor: transaction.iconColor,
-        date: 'Today',
-      };
-      setTransactions(prev => [newTransaction, ...prev]);
+  // Transform categoryBreakdown for BudgetHeader
+  const categoryBreakdownForHeader = useMemo(() => {
+    return categoryBreakdown.map(cat => ({
+      name: cat.name,
+      amount: cat.amount,
+      color: cat.color,
+      icon: cat.icon,
+    }));
+  }, [categoryBreakdown]);
+
+  // ========================================================================
+  // HANDLERS (Memoized)
+  // ========================================================================
+
+  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    // Only update state if change is significant (reduces re-renders)
+    if (Math.abs(y - scrollYRef.current) > 5) {
+      scrollYRef.current = y;
+      setScrollY(y);
     }
-    setEditingTransaction(null);
-  };
+  }, []);
 
-  const handleDeleteTransaction = (id: string) => {
-    setTransactions(prev => prev.filter(t => t.id !== id));
-    setEditingTransaction(null);
-  };
-
-  const handleEditTransaction = (transaction: Transaction) => {
-    setEditingTransaction({
-      id: transaction.id,
-      title: transaction.title,
-      amount: transaction.amount,
-      category: transaction.subtitle,
-      iconName: transaction.iconName,
-      iconColor: transaction.iconColor,
-    });
+  const handleEditTransaction = useCallback((transactionId: string) => {
+    setEditingTransactionId(transactionId);
     setIsModalVisible(true);
-  };
+  }, []);
 
-  const handleAddNew = () => {
-    setEditingTransaction(null);
+  const handleAddNew = useCallback(() => {
+    setEditingTransactionId(null);
     setIsModalVisible(true);
-  };
+  }, []);
 
-  const todayTransactions = transactions.filter(t => t.date === 'Today');
-  const yesterdayTransactions = transactions.filter(t => t.date === 'Yesterday');
+  const handleCloseModal = useCallback(() => {
+    setIsModalVisible(false);
+    setEditingTransactionId(null);
+  }, []);
 
-  const todayTotal = todayTransactions.reduce((sum, t) => sum + t.amount, 0);
-  const yesterdayTotal = yesterdayTransactions.reduce((sum, t) => sum + t.amount, 0);
+  // ========================================================================
+  // RENDER HELPERS
+  // ========================================================================
+
+  const renderTransactionItem = useCallback((
+    transaction: Transaction,
+    index: number,
+    totalCount: number
+  ) => {
+    const category = getCategoryById(transaction.categoryId);
+
+    return (
+      <TouchableOpacity
+        key={transaction.id}
+        onPress={() => handleEditTransaction(transaction.id)}
+        activeOpacity={0.7}
+      >
+        <TransactionRow
+          title={transaction.title}
+          subtitle={category?.name || 'Unknown'}
+          amount={transaction.amount}
+          iconName={category?.icon || 'help-outline'}
+          iconColor={category?.color || '#888'}
+        />
+        {index < totalCount - 1 && (
+          <View style={[styles.separator, { backgroundColor: theme.separator }]} />
+        )}
+      </TouchableOpacity>
+    );
+  }, [getCategoryById, handleEditTransaction, theme.separator]);
+
+  const renderGroup: ListRenderItem<TransactionGroup> = useCallback(({ item: group }) => (
+    <Card>
+      <View style={styles.cardHeader}>
+        <Text style={[styles.cardTitle, { color: theme.text }]}>{group.displayDate}</Text>
+        <Text style={[styles.cardTotal, { color: theme.expense }]}>
+          -${Math.abs(group.total).toFixed(2)}
+        </Text>
+      </View>
+      {group.transactions.map((t, idx) =>
+        renderTransactionItem(t, idx, group.transactions.length)
+      )}
+    </Card>
+  ), [theme.text, theme.expense, renderTransactionItem]);
+
+  const ListHeaderComponent = useMemo(() => (
+    <BudgetHeader
+      monthlyBudget={budget}
+      totalSpent={totalSpent}
+      categoryBreakdown={categoryBreakdownForHeader}
+      scrollY={scrollY}
+    />
+  ), [budget, totalSpent, categoryBreakdownForHeader, scrollY]);
+
+  const ListEmptyComponent = useMemo(() => (
+    <Card>
+      <View style={styles.emptyState}>
+        <Ionicons name="wallet-outline" size={48} color={theme.textSecondary} />
+        <Text style={[styles.emptyTitle, { color: theme.text }]}>No Transactions Yet</Text>
+        <Text style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
+          Tap the + button to add your first expense
+        </Text>
+      </View>
+    </Card>
+  ), [theme.text, theme.textSecondary]);
+
+  const keyExtractor = useCallback((item: TransactionGroup) => item.date, []);
+
+  // ========================================================================
+  // RENDER
+  // ========================================================================
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Single ScrollView - Everything scrolls together (Cards Pattern) */}
-      <ScrollView
-        style={{ flex: 1 }}
+      {/* Virtualized List */}
+      <FlatList
+        data={transactionGroups}
+        renderItem={renderGroup}
+        keyExtractor={keyExtractor}
+        ListHeaderComponent={ListHeaderComponent}
+        ListEmptyComponent={ListEmptyComponent}
         contentContainerStyle={styles.scrollContent}
-        onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
-        scrollEventThrottle={16}
+        onScroll={handleScroll}
+        scrollEventThrottle={32} // Reduced from 16 for better performance
         showsVerticalScrollIndicator={true}
-      >
-        {/* Card 1: Header with Tabs + Chart */}
-        <BudgetHeader
-          monthlyBudget={MONTHLY_BUDGET}
-          totalSpent={totalSpent}
-          categoryBreakdown={categoryBreakdown}
-          scrollY={scrollY}
-        />
-
-        {/* Card 2: Today's Transactions */}
-        {todayTransactions.length > 0 && (
-          <Card>
-            <View style={styles.cardHeader}>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>Today</Text>
-              <Text style={[styles.cardTotal, { color: theme.expense }]}>
-                -${Math.abs(todayTotal).toFixed(2)}
-              </Text>
-            </View>
-
-            {todayTransactions.map((transaction, index) => (
-              <TouchableOpacity
-                key={transaction.id}
-                onPress={() => handleEditTransaction(transaction)}
-                activeOpacity={0.7}
-              >
-                <TransactionRow
-                  title={transaction.title}
-                  subtitle={transaction.subtitle}
-                  amount={transaction.amount}
-                  iconName={transaction.iconName}
-                  iconColor={transaction.iconColor}
-                />
-                {index < todayTransactions.length - 1 && (
-                  <View style={[styles.separator, { backgroundColor: theme.separator }]} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </Card>
-        )}
-
-        {/* Yesterday's Transactions */}
-        {yesterdayTransactions.length > 0 && (
-          <Card>
-            <View style={styles.cardHeader}>
-              <Text style={[styles.cardTitle, { color: theme.text }]}>Yesterday</Text>
-              <Text style={[styles.cardTotal, { color: theme.expense }]}>
-                -${Math.abs(yesterdayTotal).toFixed(2)}
-              </Text>
-            </View>
-
-            {yesterdayTransactions.map((transaction, index) => (
-              <TouchableOpacity
-                key={transaction.id}
-                onPress={() => handleEditTransaction(transaction)}
-                activeOpacity={0.7}
-              >
-                <TransactionRow
-                  title={transaction.title}
-                  subtitle={transaction.subtitle}
-                  amount={transaction.amount}
-                  iconName={transaction.iconName}
-                  iconColor={transaction.iconColor}
-                />
-                {index < yesterdayTransactions.length - 1 && (
-                  <View style={[styles.separator, { backgroundColor: theme.separator }]} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </Card>
-        )}
-      </ScrollView>
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={5}
+        windowSize={10}
+        initialNumToRender={3}
+      />
 
       {/* Floating Action Button */}
       <TouchableOpacity
@@ -207,20 +244,19 @@ export default function HomeScreen() {
         <Ionicons name="add" size={32} color="#FFFFFF" />
       </TouchableOpacity>
 
-      {/* Transaction Modal (Add/Edit) */}
+      {/* Transaction Modal */}
       <TransactionModal
         visible={isModalVisible}
-        onClose={() => {
-          setIsModalVisible(false);
-          setEditingTransaction(null);
-        }}
-        onSave={handleSaveTransaction}
-        onDelete={handleDeleteTransaction}
-        editTransaction={editingTransaction}
+        onClose={handleCloseModal}
+        editTransactionId={editingTransactionId}
       />
     </View>
   );
 }
+
+// ============================================================================
+// STYLES
+// ============================================================================
 
 const styles = StyleSheet.create({
   container: {
@@ -257,7 +293,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: {
       width: 0,
       height: 4,
@@ -265,5 +301,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
     elevation: 8,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });

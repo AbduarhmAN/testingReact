@@ -1,11 +1,12 @@
 import { Colors } from '@/constants/theme';
+import { Category, useBudget } from '@/context/BudgetContext';
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+    FlatList,
     KeyboardAvoidingView,
     Modal,
     Platform,
-    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -14,109 +15,213 @@ import {
     View,
 } from 'react-native';
 
-type Category = {
-    name: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    color: string;
-};
+// ============================================================================
+// TYPES
+// ============================================================================
 
-export const CATEGORIES: Category[] = [
-    { name: 'Groceries', icon: 'cart', color: '#FF9500' },
-    { name: 'Coffee', icon: 'cafe', color: '#AF52DE' },
-    { name: 'Transport', icon: 'car', color: '#5AC8FA' },
-    { name: 'Food', icon: 'restaurant', color: '#FF3B30' },
-    { name: 'Shopping', icon: 'bag', color: '#34C759' },
-    { name: 'Health', icon: 'fitness', color: '#5856D6' },
-];
-
-export type TransactionData = {
+interface TransactionFormData {
     id?: string;
     title: string;
     amount: number;
-    category: string;
-    iconName: string;
-    iconColor: string;
-};
+    categoryId: string;
+    date: string;
+    note?: string;
+}
 
-type TransactionModalProps = {
+interface TransactionModalProps {
     visible: boolean;
     onClose: () => void;
-    onSave: (transaction: TransactionData) => void;
-    onDelete?: (id: string) => void;
-    editTransaction?: TransactionData | null;
-};
+    editTransactionId?: string | null;
+}
 
-export function TransactionModal({ visible, onClose, onSave, onDelete, editTransaction }: TransactionModalProps) {
+// ============================================================================
+// AMOUNT PARSER (NaN-Safe)
+// ============================================================================
+
+function parseAmount(input: string): number | null {
+    if (!input || input === '.' || input === '-' || input === '-.') {
+        return null;
+    }
+    const parsed = parseFloat(input);
+    if (!Number.isFinite(parsed)) {
+        return null;
+    }
+    return parsed;
+}
+
+function formatAmountDisplay(input: string): string {
+    if (!input) return '0.00';
+    // Remove leading zeros except for "0."
+    let cleaned = input.replace(/^0+(?=\d)/, '');
+    if (cleaned.startsWith('.')) cleaned = '0' + cleaned;
+    return cleaned || '0.00';
+}
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
+export function TransactionModal({ visible, onClose, editTransactionId }: TransactionModalProps) {
     const colorScheme = useColorScheme();
     const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-    const [amount, setAmount] = useState('');
+    const {
+        categories,
+        transactions,
+        addTransaction,
+        updateTransaction,
+        deleteTransaction
+    } = useBudget();
+
+    // Form state
+    const [amountInput, setAmountInput] = useState('');
     const [title, setTitle] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
+    const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+    const [note, setNote] = useState('');
 
-    const isEditMode = !!editTransaction;
+    // Derived state
+    const isEditMode = !!editTransactionId;
+    const editingTransaction = useMemo(() =>
+        editTransactionId ? transactions.find(t => t.id === editTransactionId) : null,
+        [editTransactionId, transactions]
+    );
 
-    // Pre-fill form when editing
+    // Reset form when modal opens/closes or edit target changes
     useEffect(() => {
-        if (editTransaction) {
-            setAmount(Math.abs(editTransaction.amount).toString());
-            setTitle(editTransaction.title);
-            const cat = CATEGORIES.find(c => c.name === editTransaction.category);
-            setSelectedCategory(cat || null);
-        } else {
-            setAmount('');
-            setTitle('');
-            setSelectedCategory(null);
+        if (visible) {
+            if (editingTransaction) {
+                setAmountInput(Math.abs(editingTransaction.amount).toString());
+                setTitle(editingTransaction.title);
+                setSelectedCategoryId(editingTransaction.categoryId);
+                setNote(editingTransaction.note || '');
+            } else {
+                setAmountInput('');
+                setTitle('');
+                setSelectedCategoryId(categories[0]?.id || null);
+                setNote('');
+            }
         }
-    }, [editTransaction, visible]);
+    }, [visible, editingTransaction, categories]);
 
-    const handleSave = () => {
-        if (!amount || !title || !selectedCategory) return;
+    // Cleanup on unmount (memory leak prevention)
+    useEffect(() => {
+        return () => {
+            setAmountInput('');
+            setTitle('');
+            setSelectedCategoryId(null);
+            setNote('');
+        };
+    }, []);
 
-        onSave({
-            id: editTransaction?.id,
-            title,
-            amount: -Math.abs(parseFloat(amount)),
-            category: selectedCategory.name,
-            iconName: selectedCategory.icon,
-            iconColor: selectedCategory.color,
-        });
+    const selectedCategory = useMemo(() =>
+        categories.find(c => c.id === selectedCategoryId),
+        [categories, selectedCategoryId]
+    );
 
-        // Reset form
-        setAmount('');
-        setTitle('');
-        setSelectedCategory(null);
+    const isFormValid = useMemo(() => {
+        const amount = parseAmount(amountInput);
+        return amount !== null && amount > 0 && title.trim().length > 0 && selectedCategoryId !== null;
+    }, [amountInput, title, selectedCategoryId]);
+
+    // ========================================================================
+    // HANDLERS
+    // ========================================================================
+
+    const handleSave = useCallback(() => {
+        const amount = parseAmount(amountInput);
+        if (amount === null || amount <= 0 || !title.trim() || !selectedCategoryId) {
+            return;
+        }
+
+        const transactionData = {
+            title: title.trim(),
+            amount: -Math.abs(amount), // Expenses are negative
+            categoryId: selectedCategoryId,
+            date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
+            note: note.trim() || undefined,
+        };
+
+        if (isEditMode && editTransactionId) {
+            updateTransaction(editTransactionId, transactionData);
+        } else {
+            addTransaction(transactionData);
+        }
+
         onClose();
-    };
+    }, [amountInput, title, selectedCategoryId, note, isEditMode, editTransactionId, updateTransaction, addTransaction, onClose]);
 
-    const handleDelete = () => {
-        if (editTransaction?.id && onDelete) {
-            onDelete(editTransaction.id);
+    const handleDelete = useCallback(() => {
+        if (editTransactionId) {
+            deleteTransaction(editTransactionId);
             onClose();
         }
-    };
+    }, [editTransactionId, deleteTransaction, onClose]);
 
-    const handleNumpadPress = (value: string) => {
-        if (value === 'backspace') {
-            setAmount(prev => prev.slice(0, -1));
-        } else if (value === '.') {
-            if (!amount.includes('.')) {
-                setAmount(prev => prev + value);
+    const handleNumpadPress = useCallback((value: string) => {
+        setAmountInput(prev => {
+            if (value === 'backspace') {
+                return prev.slice(0, -1);
             }
-        } else {
-            setAmount(prev => prev + value);
-        }
-    };
+            if (value === '.') {
+                if (prev.includes('.')) return prev;
+                return prev + value;
+            }
+            // Limit decimal places to 2
+            const parts = prev.split('.');
+            if (parts[1] && parts[1].length >= 2) return prev;
+            // Limit total length
+            if (prev.length >= 10) return prev;
+            return prev + value;
+        });
+    }, []);
 
-    const handleClose = () => {
-        setAmount('');
-        setTitle('');
-        setSelectedCategory(null);
+    const handleClose = useCallback(() => {
+        // State cleanup handled by useEffect
         onClose();
-    };
+    }, [onClose]);
+
+    // ========================================================================
+    // RENDER HELPERS
+    // ========================================================================
+
+    const renderCategoryItem = useCallback(({ item }: { item: Category }) => {
+        const isSelected = selectedCategoryId === item.id;
+        return (
+            <TouchableOpacity
+                onPress={() => setSelectedCategoryId(item.id)}
+                style={[
+                    styles.categoryItem,
+                    isSelected && { backgroundColor: item.color + '30' },
+                ]}
+            >
+                <View style={[styles.categoryIcon, { backgroundColor: item.color + '20' }]}>
+                    <Ionicons name={item.icon} size={24} color={item.color} />
+                </View>
+                <Text style={[styles.categoryName, { color: theme.text }]}>{item.name}</Text>
+            </TouchableOpacity>
+        );
+    }, [selectedCategoryId, theme.text]);
+
+    const renderNumpadKey = useCallback((key: string) => (
+        <TouchableOpacity
+            key={key}
+            style={[styles.numpadKey, { backgroundColor: theme.background }]}
+            onPress={() => handleNumpadPress(key)}
+        >
+            {key === 'backspace' ? (
+                <Ionicons name="backspace-outline" size={24} color={theme.text} />
+            ) : (
+                <Text style={[styles.numpadText, { color: theme.text }]}>{key}</Text>
+            )}
+        </TouchableOpacity>
+    ), [theme.background, theme.text, handleNumpadPress]);
+
+    // ========================================================================
+    // RENDER
+    // ========================================================================
 
     return (
-        <Modal visible={visible} animationType="slide" transparent>
+        <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 style={styles.modalOverlay}
@@ -130,8 +235,11 @@ export function TransactionModal({ visible, onClose, onSave, onDelete, editTrans
                         <Text style={[styles.modalTitle, { color: theme.text }]}>
                             {isEditMode ? 'Edit Expense' : 'Add Expense'}
                         </Text>
-                        <TouchableOpacity onPress={handleSave}>
-                            <Text style={[styles.addButton, { color: theme.tint }]}>
+                        <TouchableOpacity onPress={handleSave} disabled={!isFormValid}>
+                            <Text style={[
+                                styles.addButton,
+                                { color: isFormValid ? theme.tint : theme.textSecondary }
+                            ]}>
                                 {isEditMode ? 'Save' : 'Add'}
                             </Text>
                         </TouchableOpacity>
@@ -141,7 +249,7 @@ export function TransactionModal({ visible, onClose, onSave, onDelete, editTrans
                     <View style={styles.amountContainer}>
                         <Text style={[styles.currencySymbol, { color: theme.textSecondary }]}>$</Text>
                         <Text style={[styles.amountText, { color: theme.text }]}>
-                            {amount || '0.00'}
+                            {formatAmountDisplay(amountInput)}
                         </Text>
                     </View>
 
@@ -152,43 +260,24 @@ export function TransactionModal({ visible, onClose, onSave, onDelete, editTrans
                         placeholderTextColor={theme.textSecondary}
                         value={title}
                         onChangeText={setTitle}
+                        maxLength={100}
                     />
 
-                    {/* Category Selection */}
+                    {/* Category Selection - Using FlatList for virtualization */}
                     <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Category</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-                        {CATEGORIES.map((cat) => (
-                            <TouchableOpacity
-                                key={cat.name}
-                                onPress={() => setSelectedCategory(cat)}
-                                style={[
-                                    styles.categoryItem,
-                                    selectedCategory?.name === cat.name && { backgroundColor: cat.color + '30' },
-                                ]}
-                            >
-                                <View style={[styles.categoryIcon, { backgroundColor: cat.color + '20' }]}>
-                                    <Ionicons name={cat.icon} size={24} color={cat.color} />
-                                </View>
-                                <Text style={[styles.categoryName, { color: theme.text }]}>{cat.name}</Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
+                    <FlatList
+                        data={categories}
+                        renderItem={renderCategoryItem}
+                        keyExtractor={item => item.id}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.categoryScroll}
+                        contentContainerStyle={styles.categoryList}
+                    />
 
                     {/* Numpad */}
                     <View style={styles.numpad}>
-                        {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'backspace'].map((key) => (
-                            <TouchableOpacity
-                                key={key}
-                                style={[styles.numpadKey, { backgroundColor: theme.background }]}
-                                onPress={() => handleNumpadPress(key)}
-                            >
-                                {key === 'backspace' ? (
-                                    <Ionicons name="backspace-outline" size={24} color={theme.text} />
-                                ) : (
-                                    <Text style={[styles.numpadText, { color: theme.text }]}>{key}</Text>
-                                )}
-                            </TouchableOpacity>
-                        ))}
+                        {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'backspace'].map(renderNumpadKey)}
                     </View>
 
                     {/* Delete Button (only in edit mode) */}
@@ -206,6 +295,10 @@ export function TransactionModal({ visible, onClose, onSave, onDelete, editTrans
         </Modal>
     );
 }
+
+// ============================================================================
+// STYLES
+// ============================================================================
 
 const styles = StyleSheet.create({
     modalOverlay: {
@@ -265,6 +358,10 @@ const styles = StyleSheet.create({
     },
     categoryScroll: {
         marginBottom: 20,
+        maxHeight: 100,
+    },
+    categoryList: {
+        paddingRight: 16,
     },
     categoryItem: {
         alignItems: 'center',
