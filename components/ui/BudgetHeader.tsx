@@ -2,6 +2,7 @@ import { Colors } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, useColorScheme, View } from 'react-native';
+import { SharedValue } from 'react-native-reanimated';
 import { InfographicChart } from './InfographicChart';
 
 type Tab = 'Plan' | 'Remaining' | 'Insights';
@@ -18,7 +19,7 @@ type BudgetHeaderProps = {
     totalSpent: number;
     categoryBreakdown: CategorySpending[];
     onTabChange?: (tab: Tab) => void;
-    scrollY?: number; // Scroll position for shrinking effect
+    scrollY?: SharedValue<number>; // Reanimated SharedValue
 };
 
 // Map category names to icons
@@ -33,7 +34,7 @@ const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
     'Entertainment': 'game-controller',
 };
 
-export function BudgetHeader({ monthlyBudget, totalSpent, categoryBreakdown, onTabChange, scrollY = 0 }: BudgetHeaderProps) {
+export function BudgetHeader({ monthlyBudget, totalSpent, categoryBreakdown, onTabChange, scrollY }: BudgetHeaderProps) {
     const colorScheme = useColorScheme();
     const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
     const [activeTab, setActiveTab] = useState<Tab>('Remaining');
@@ -118,9 +119,10 @@ export function BudgetHeader({ monthlyBudget, totalSpent, categoryBreakdown, onT
                         {chartData.length > 0 ? (
                             <InfographicChart
                                 data={chartData}
-                                size={Math.max(140, 260 - scrollY * 1.2)}
+                                size={300} // Fixed max size, scaling handled internally
                                 selectedIndex={selectedCategory}
                                 onSelectCategory={setSelectedCategory}
+                                scrollY={scrollY}
                             />
                         ) : (
                             <View style={styles.emptyState}>

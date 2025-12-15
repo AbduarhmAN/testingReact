@@ -5,9 +5,11 @@ import React, { useCallback, useEffect, useMemo } from 'react';
 import { StyleSheet, Text, useColorScheme, View } from 'react-native';
 import Animated, {
     Easing,
+    Extrapolate,
     FadeIn,
     FadeOut,
     interpolate,
+    SharedValue,
     SlideInDown,
     useAnimatedProps,
     useAnimatedStyle,
@@ -26,14 +28,6 @@ const MIN_ICON_PERCENTAGE = 12;
 const CORNER_RADIUS_MAX = 12;
 const ANIMATION_DURATION = 600;
 const SPRING_CONFIG = { damping: 15, stiffness: 100 };
-
-// Display levels based on size
-const DISPLAY_LEVELS = {
-    FULL: 300,      // Everything visible
-    MEDIUM: 200,    // No percentages
-    MINIMAL: 150,   // No icons
-    COMPACT: 0,     // Only slices + names
-} as const;
 
 // ============================================================================
 // TYPES
@@ -58,6 +52,7 @@ interface InfographicChartProps {
     size?: number;
     onSelectCategory?: (index: number | null) => void;
     selectedIndex?: number | null;
+    scrollY?: SharedValue<number>;
 }
 
 // ============================================================================
@@ -72,20 +67,11 @@ const AnimatedView = Animated.View;
 // ============================================================================
 
 function polarToCartesian(cx: number, cy: number, r: number, angle: number): { x: number; y: number } {
-    // D3 uses 0 = 12 o'clock, angles go clockwise
-    // Subtract PI/2 to convert to standard SVG coordinates
     const adjustedAngle = angle - Math.PI / 2;
     return {
         x: cx + r * Math.cos(adjustedAngle),
         y: cy + r * Math.sin(adjustedAngle),
     };
-}
-
-function getDisplayLevel(size: number): 'full' | 'medium' | 'minimal' | 'compact' {
-    if (size >= DISPLAY_LEVELS.FULL) return 'full';
-    if (size >= DISPLAY_LEVELS.MEDIUM) return 'medium';
-    if (size >= DISPLAY_LEVELS.MINIMAL) return 'minimal';
-    return 'compact';
 }
 
 function getStableKey(item: CategoryData, index: number): string {
@@ -98,7 +84,6 @@ function getStableKey(item: CategoryData, index: number): string {
 
 interface AnimatedSliceProps {
     slice: SliceData;
-    index: number;
     gradientId: string;
     isSelected: boolean;
     isOtherSelected: boolean;
@@ -130,7 +115,6 @@ const AnimatedSlice = React.memo(function AnimatedSlice({
         opacity.value = withTiming(isOtherSelected ? 0.4 : 1, { duration: 200 });
     }, [isOtherSelected, opacity]);
 
-    // For SVG elements, use animatedProps instead of style
     const animatedProps = useAnimatedProps(() => ({
         opacity: opacity.value,
     }));
@@ -165,7 +149,7 @@ const AnimatedIcon = React.memo(function AnimatedIcon({
     const translateY = useSharedValue(0);
 
     useEffect(() => {
-        const delay = index * 50 + 300; // Stagger after slices
+        const delay = index * 50 + 300;
         scale.value = withDelay(delay, withSpring(1, SPRING_CONFIG));
     }, [scale, index]);
 
@@ -279,6 +263,7 @@ function InfographicChartInner({
     size = 300,
     onSelectCategory,
     selectedIndex = null,
+    scrollY,
 }: InfographicChartProps) {
     const colorScheme = useColorScheme();
     const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
@@ -296,7 +281,25 @@ function InfographicChartInner({
         return { cx, cy, innerRadius, outerRadius, cornerRadius };
     }, [size]);
 
-    const displayLevel = useMemo(() => getDisplayLevel(size), [size]);
+    // Animated Styles
+    const containerAnimatedStyle = useAnimatedStyle(() => {
+        if (!scrollY) return {};
+        const scale = interpolate(scrollY.value, [0, 150], [1, 0.6], Extrapolate.CLAMP);
+        const translateY = interpolate(scrollY.value, [0, 150], [0, -30], Extrapolate.CLAMP);
+
+        return {
+            transform: [
+                { scale },
+                { translateY }
+            ]
+        };
+    });
+
+    const contentOpacityStyle = useAnimatedStyle(() => {
+        if (!scrollY) return { opacity: 1 };
+        const opacity = interpolate(scrollY.value, [0, 50], [1, 0], Extrapolate.CLAMP);
+        return { opacity };
+    });
 
     const pieGenerator = useMemo(() =>
         d3.pie<CategoryData>()
@@ -312,7 +315,6 @@ function InfographicChartInner({
             .cornerRadius(dimensions.cornerRadius),
         [dimensions]);
 
-    // Filter out zero/invalid amounts
     const validData = useMemo(() =>
         data.filter(d => Number.isFinite(d.amount) && Math.abs(d.amount) > 0.01),
         [data]);
@@ -364,16 +366,16 @@ function InfographicChartInner({
     // RENDER
     // ========================================================================
 
-    const showIcons = displayLevel === 'full' || displayLevel === 'medium';
-    const showPercentages = displayLevel === 'full';
-    const showCenterText = displayLevel !== 'compact';
+    const showIcons = true;
+    const showCenterText = true;
+    const showPercentages = true; // Always show percentages in labels with this simplified logic
 
     const selectedSlice = selectedIndex !== null && selectedIndex < slices.length
         ? slices[selectedIndex]
         : null;
 
     return (
-        <View style={styles.container}>
+        <AnimatedView style={[styles.container, containerAnimatedStyle]}>
             <View style={styles.chartContainer}>
                 <Svg
                     width={size}
@@ -398,7 +400,6 @@ function InfographicChartInner({
                         ))}
                     </Defs>
 
-                    {/* Decorative outer ring */}
                     <Circle
                         cx={dimensions.cx}
                         cy={dimensions.cy}
@@ -410,7 +411,6 @@ function InfographicChartInner({
                         opacity={0.4}
                     />
 
-                    {/* Pie slices */}
                     <G x={dimensions.cx} y={dimensions.cy}>
                         {slices.map((slice, index) => (
                             <AnimatedSlice
@@ -427,7 +427,6 @@ function InfographicChartInner({
                         ))}
                     </G>
 
-                    {/* Center circle */}
                     <Circle
                         cx={dimensions.cx}
                         cy={dimensions.cy}
@@ -438,23 +437,23 @@ function InfographicChartInner({
                     />
                 </Svg>
 
-                {/* Animated Icons */}
                 {showIcons && slices.map((slice, index) => {
                     if (slice.percentage < MIN_ICON_PERCENTAGE) return null;
                     return (
-                        <AnimatedIcon
-                            key={`icon-${getStableKey(slice.data, index)}`}
-                            slice={slice}
-                            index={index}
-                            isSelected={selectedIndex === index}
-                            onPress={() => handleSelectCategory(index)}
-                        />
+                        <AnimatedView key={`icon-wrapper-${getStableKey(slice.data, index)}`} style={contentOpacityStyle} pointerEvents="none">
+                            <AnimatedIcon
+                                key={`icon-${getStableKey(slice.data, index)}`}
+                                slice={slice}
+                                index={index}
+                                isSelected={selectedIndex === index}
+                                onPress={() => handleSelectCategory(index)}
+                            />
+                        </AnimatedView>
                     );
                 })}
 
-                {/* Center text */}
                 {showCenterText && (
-                    <View style={[styles.centerContent, {
+                    <AnimatedView style={[styles.centerContent, contentOpacityStyle, {
                         left: dimensions.cx - 30,
                         top: dimensions.cy - 20
                     }]}>
@@ -464,11 +463,10 @@ function InfographicChartInner({
                         <Text style={[styles.centerLabel, { color: theme.textSecondary }]}>
                             Categories
                         </Text>
-                    </View>
+                    </AnimatedView>
                 )}
             </View>
 
-            {/* Labels */}
             <View style={styles.labelsRow}>
                 {slices.map((slice, index) => (
                     <LabelPill
@@ -483,11 +481,10 @@ function InfographicChartInner({
                 ))}
             </View>
 
-            {/* Detail Card with animation */}
             {selectedSlice && (
                 <DetailCard slice={selectedSlice} theme={theme} />
             )}
-        </View>
+        </AnimatedView>
     );
 }
 
@@ -500,7 +497,7 @@ export const InfographicChart = React.memo(InfographicChartInner, (prevProps, ne
         prevProps.data === nextProps.data &&
         prevProps.size === nextProps.size &&
         prevProps.selectedIndex === nextProps.selectedIndex &&
-        prevProps.onSelectCategory === nextProps.onSelectCategory
+        prevProps.scrollY === nextProps.scrollY // Check SharedValue ref equality
     );
 });
 

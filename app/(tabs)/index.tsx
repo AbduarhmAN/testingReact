@@ -1,15 +1,13 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
-  FlatList,
   ListRenderItem,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   StyleSheet,
   Text,
   TouchableOpacity,
   useColorScheme,
-  View,
+  View
 } from 'react-native';
+import Animated, { useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 
 import { AddCategoryModal } from '@/components/ui/AddCategoryModal';
 import { TransactionModal } from '@/components/ui/AddTransactionModal';
@@ -76,10 +74,15 @@ export default function HomeScreen() {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
-  const [scrollY, setScrollY] = useState(0);
 
-  // Refs for performance
-  const scrollYRef = useRef(0);
+  // Reanimated Shared Value for smooth scroll
+  const scrollY = useSharedValue(0);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
 
   // ========================================================================
   // MEMOIZED DATA
@@ -122,14 +125,8 @@ export default function HomeScreen() {
   // HANDLERS (Memoized)
   // ========================================================================
 
-  const handleScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = e.nativeEvent.contentOffset.y;
-    // Only update state if change is significant (reduces re-renders)
-    if (Math.abs(y - scrollYRef.current) > 5) {
-      scrollYRef.current = y;
-      setScrollY(y);
-    }
-  }, []);
+  // Scroll handler replaced by Reanimated
+  // const handleScroll = ...
 
   const handleEditTransaction = useCallback((transactionId: string) => {
     setEditingTransactionId(transactionId);
@@ -206,7 +203,7 @@ export default function HomeScreen() {
       categoryBreakdown={categoryBreakdownForHeader}
       scrollY={scrollY}
     />
-  ), [budget, totalSpent, categoryBreakdownForHeader, scrollY]);
+  ), [budget, totalSpent, categoryBreakdownForHeader]);
 
   const ListEmptyComponent = useMemo(() => (
     <Card>
@@ -229,15 +226,15 @@ export default function HomeScreen() {
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Virtualized List */}
-      <FlatList
+      <Animated.FlatList
         data={transactionGroups}
         renderItem={renderGroup}
         keyExtractor={keyExtractor}
         ListHeaderComponent={ListHeaderComponent}
         ListEmptyComponent={ListEmptyComponent}
         contentContainerStyle={styles.scrollContent}
-        onScroll={handleScroll}
-        scrollEventThrottle={32} // Reduced from 16 for better performance
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={true}
         removeClippedSubviews={true}
         maxToRenderPerBatch={5}
