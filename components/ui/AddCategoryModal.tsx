@@ -1,15 +1,13 @@
 import { Colors, getCategoryColor } from '@/constants/theme';
+import { useBudget } from '@/context/BudgetContext';
 import { Ionicons } from '@expo/vector-icons';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useColorScheme, View } from 'react-native';
 import { ColorPicker } from './ColorPicker';
 
-type AddCategoryModalProps = {
-    visible: boolean;
-    onClose: () => void;
-    onAdd: (category: { name: string; icon: keyof typeof Ionicons.glyphMap; color: string }) => void;
-    categoryCount: number; // Used to calculate default color
-};
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
 const ICON_OPTIONS: (keyof typeof Ionicons.glyphMap)[] = [
     'cart-outline', 'home-outline', 'car-outline', 'fitness-outline', 'cafe-outline',
@@ -20,58 +18,203 @@ const ICON_OPTIONS: (keyof typeof Ionicons.glyphMap)[] = [
     'heart-outline', 'star-outline', 'sparkles-outline', 'diamond-outline', 'receipt-outline',
 ];
 
-export function AddCategoryModal({ visible, onClose, onAdd, categoryCount }: AddCategoryModalProps) {
+const DEFAULT_ICON: keyof typeof Ionicons.glyphMap = 'cart-outline';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface AddCategoryModalProps {
+    visible: boolean;
+    onClose: () => void;
+}
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
+export function AddCategoryModal({ visible, onClose }: AddCategoryModalProps) {
     const colorScheme = useColorScheme();
     const theme = colorScheme === 'dark' ? Colors.dark : Colors.light;
 
-    const defaultColor = getCategoryColor(categoryCount);
+    const { addCategory, categories, nextColorIndex } = useBudget();
+
+    // ========================================================================
+    // STATE
+    // ========================================================================
 
     const [name, setName] = useState('');
-    const [selectedIcon, setSelectedIcon] = useState<keyof typeof Ionicons.glyphMap>('cart-outline');
-    const [selectedColor, setSelectedColor] = useState(defaultColor);
+    const [selectedIcon, setSelectedIcon] = useState<keyof typeof Ionicons.glyphMap>(DEFAULT_ICON);
+    const [selectedColor, setSelectedColor] = useState<string>('');
+    const [error, setError] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const handleAdd = () => {
-        if (name.trim()) {
-            onAdd({ name: name.trim(), icon: selectedIcon, color: selectedColor });
+    // Track if component is mounted to prevent state updates after unmount
+    const isMountedRef = useRef(true);
+
+    // ========================================================================
+    // DERIVED STATE
+    // ========================================================================
+
+    // Calculate default color from context's nextColorIndex (fresh on every render)
+    const defaultColor = getCategoryColor(nextColorIndex);
+
+    // ========================================================================
+    // EFFECTS
+    // ========================================================================
+
+    // Track mount status for cleanup
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, []);
+
+    // Reset form when modal opens (using FRESH nextColorIndex from context)
+    useEffect(() => {
+        if (visible) {
+            // Read nextColorIndex directly from context (not stale prop)
             setName('');
-            setSelectedIcon('cart-outline');
-            setSelectedColor(getCategoryColor(categoryCount + 1));
+            setSelectedIcon(DEFAULT_ICON);
+            setSelectedColor(getCategoryColor(nextColorIndex));
+            setError('');
+            setIsSubmitting(false);
+        }
+    }, [visible, nextColorIndex]);
+
+    // ========================================================================
+    // HANDLERS
+    // ========================================================================
+
+    const handleAdd = useCallback(() => {
+        // GUARD: Prevent rapid double-submit
+        if (isSubmitting) {
+            return;
+        }
+
+        const trimmedName = name.trim();
+
+        // Validation
+        if (!trimmedName) {
+            setError('Name is required');
+            return;
+        }
+        if (trimmedName.length > 30) {
+            setError('Name must be 30 characters or less');
+            return;
+        }
+
+        // Uniqueness check - READ FRESH from context (categories is from useBudget, updates on every render)
+        const nameExists = categories.some(
+            c => c.name.toLowerCase() === trimmedName.toLowerCase()
+        );
+        if (nameExists) {
+            setError('Category name already exists');
+            return;
+        }
+
+        // LOCK: Set submitting immediately to block rapid taps
+        setIsSubmitting(true);
+
+        // Determine if user selected a custom color or using default
+        const isUsingDefaultColor = selectedColor === defaultColor;
+
+        // Add category (context handles UUID and color fallback)
+        addCategory({
+            name: trimmedName,
+            icon: selectedIcon,
+            color: isUsingDefaultColor ? undefined : selectedColor,
+        });
+
+        // Close modal only after state is set
+        // Check if still mounted before updating state
+        if (isMountedRef.current) {
             onClose();
         }
-    };
+    }, [isSubmitting, name, categories, selectedColor, defaultColor, selectedIcon, addCategory, onClose]);
 
-    const handleClose = () => {
-        setName('');
-        setSelectedIcon('cart-outline');
-        setSelectedColor(defaultColor);
+    const handleClose = useCallback(() => {
+        // Don't allow close during submission
+        if (isSubmitting) {
+            return;
+        }
         onClose();
-    };
+    }, [isSubmitting, onClose]);
+
+    const handleNameChange = useCallback((text: string) => {
+        setName(text);
+        setError('');
+    }, []);
+
+    const handleIconSelect = useCallback((icon: keyof typeof Ionicons.glyphMap) => {
+        setSelectedIcon(icon);
+    }, []);
+
+    // ========================================================================
+    // COMPUTED
+    // ========================================================================
+
+    const isAddDisabled = !name.trim() || isSubmitting;
+
+    // ========================================================================
+    // RENDER
+    // ========================================================================
 
     return (
-        <Modal visible={visible} animationType="slide" transparent>
+        <Modal
+            visible={visible}
+            animationType="slide"
+            transparent
+            onRequestClose={handleClose}
+        >
             <View style={styles.overlay}>
                 <View style={[styles.modal, { backgroundColor: theme.card }]}>
                     {/* Header */}
                     <View style={styles.header}>
-                        <TouchableOpacity onPress={handleClose}>
-                            <Text style={[styles.headerButton, { color: theme.tint }]}>Cancel</Text>
+                        <TouchableOpacity onPress={handleClose} disabled={isSubmitting}>
+                            <Text style={[
+                                styles.headerButton,
+                                { color: isSubmitting ? theme.textSecondary : theme.tint }
+                            ]}>
+                                Cancel
+                            </Text>
                         </TouchableOpacity>
                         <Text style={[styles.headerTitle, { color: theme.text }]}>New Category</Text>
-                        <TouchableOpacity onPress={handleAdd} disabled={!name.trim()}>
-                            <Text style={[styles.headerButton, { color: name.trim() ? theme.tint : theme.textSecondary }]}>Add</Text>
+                        <TouchableOpacity onPress={handleAdd} disabled={isAddDisabled}>
+                            <Text style={[
+                                styles.headerButton,
+                                { color: isAddDisabled ? theme.textSecondary : theme.tint }
+                            ]}>
+                                {isSubmitting ? 'Adding...' : 'Add'}
+                            </Text>
                         </TouchableOpacity>
                     </View>
 
                     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+                        {/* Error Message */}
+                        {error ? (
+                            <Text style={[styles.errorText, { color: theme.expense }]}>{error}</Text>
+                        ) : null}
+
                         {/* Category Name */}
                         <Text style={[styles.label, { color: theme.textSecondary }]}>CATEGORY NAME</Text>
                         <TextInput
-                            style={[styles.input, { backgroundColor: theme.background, color: theme.text, borderColor: theme.separator }]}
+                            style={[
+                                styles.input,
+                                {
+                                    backgroundColor: theme.background,
+                                    color: theme.text,
+                                    borderColor: error ? theme.expense : theme.separator
+                                }
+                            ]}
                             placeholder="e.g., Groceries"
                             placeholderTextColor={theme.textSecondary}
                             value={name}
-                            onChangeText={setName}
+                            onChangeText={handleNameChange}
                             autoFocus
+                            editable={!isSubmitting}
+                            maxLength={30}
                         />
 
                         {/* Icon Selection */}
@@ -84,9 +227,14 @@ export function AddCategoryModal({ visible, onClose, onAdd, categoryCount }: Add
                                         styles.iconButton,
                                         { backgroundColor: selectedIcon === icon ? selectedColor : theme.background },
                                     ]}
-                                    onPress={() => setSelectedIcon(icon)}
+                                    onPress={() => handleIconSelect(icon)}
+                                    disabled={isSubmitting}
                                 >
-                                    <Ionicons name={icon} size={24} color={selectedIcon === icon ? '#FFF' : theme.text} />
+                                    <Ionicons
+                                        name={icon}
+                                        size={24}
+                                        color={selectedIcon === icon ? '#FFF' : theme.text}
+                                    />
                                 </TouchableOpacity>
                             ))}
                         </View>
@@ -101,7 +249,9 @@ export function AddCategoryModal({ visible, onClose, onAdd, categoryCount }: Add
                             <View style={[styles.previewIcon, { backgroundColor: selectedColor }]}>
                                 <Ionicons name={selectedIcon} size={24} color="#FFF" />
                             </View>
-                            <Text style={[styles.previewText, { color: theme.text }]}>{name || 'Category Name'}</Text>
+                            <Text style={[styles.previewText, { color: theme.text }]}>
+                                {name || 'Category Name'}
+                            </Text>
                         </View>
                     </ScrollView>
                 </View>
@@ -109,6 +259,10 @@ export function AddCategoryModal({ visible, onClose, onAdd, categoryCount }: Add
         </Modal>
     );
 }
+
+// ============================================================================
+// STYLES
+// ============================================================================
 
 const styles = StyleSheet.create({
     overlay: {
@@ -141,6 +295,12 @@ const styles = StyleSheet.create({
     content: {
         padding: 16,
         paddingBottom: 40,
+    },
+    errorText: {
+        marginBottom: 10,
+        textAlign: 'center',
+        fontSize: 14,
+        fontWeight: '500',
     },
     label: {
         fontSize: 12,

@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import { AddCategoryModal } from '@/components/ui/AddCategoryModal';
 import { TransactionModal } from '@/components/ui/AddTransactionModal';
 import { BudgetHeader } from '@/components/ui/BudgetHeader';
 import { Card } from '@/components/ui/Card';
@@ -73,6 +74,7 @@ export default function HomeScreen() {
 
   // UI State
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isCategoryModalVisible, setIsCategoryModalVisible] = useState(false);
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const [scrollY, setScrollY] = useState(0);
 
@@ -142,6 +144,14 @@ export default function HomeScreen() {
   const handleCloseModal = useCallback(() => {
     setIsModalVisible(false);
     setEditingTransactionId(null);
+  }, []);
+
+  const handleAddCategory = useCallback(() => {
+    setIsCategoryModalVisible(true);
+  }, []);
+
+  const handleCloseCategoryModal = useCallback(() => {
+    setIsCategoryModalVisible(false);
   }, []);
 
   // ========================================================================
@@ -235,7 +245,15 @@ export default function HomeScreen() {
         initialNumToRender={3}
       />
 
-      {/* Floating Action Button */}
+      {/* Floating Action Buttons */}
+      <TouchableOpacity
+        style={[styles.fab, styles.fabSecondary, { backgroundColor: theme.card }]}
+        onPress={handleAddCategory}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="pricetag-outline" size={24} color={theme.text} />
+      </TouchableOpacity>
+
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: theme.tint }]}
         onPress={handleAddNew}
@@ -249,6 +267,12 @@ export default function HomeScreen() {
         visible={isModalVisible}
         onClose={handleCloseModal}
         editTransactionId={editingTransactionId}
+      />
+
+      {/* Add Category Modal */}
+      <AddCategoryModal
+        visible={isCategoryModalVisible}
+        onClose={handleCloseCategoryModal}
       />
     </View>
   );
@@ -301,6 +325,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
     elevation: 8,
+  },
+  fabSecondary: {
+    bottom: 90, // Positioned above the main FAB
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   emptyState: {
     alignItems: 'center',

@@ -40,10 +40,11 @@ interface BudgetContextType {
 
     // Categories
     categories: Category[];
-    addCategory: (category: Omit<Category, 'id' | 'createdAt'>) => void;
+    addCategory: (category: Omit<Category, 'id' | 'createdAt' | 'color'> & { color?: string }) => void;
     updateCategory: (id: string, updates: Partial<Omit<Category, 'id' | 'createdAt'>>) => void;
     deleteCategory: (id: string) => void;
     getCategoryById: (id: string) => Category | undefined;
+    nextColorIndex: number;
 
     // Transactions
     transactions: Transaction[];
@@ -96,20 +97,31 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         }));
     });
 
+    const [nextColorIndex, setNextColorIndex] = useState(DEFAULT_CATEGORIES.length);
+
     const [transactions, setTransactions] = useState<Transaction[]>([]);
 
     // ========================================================================
     // CATEGORY OPERATIONS
     // ========================================================================
 
-    const addCategory = useCallback((category: Omit<Category, 'id' | 'createdAt'>) => {
+    const addCategory = useCallback((category: Omit<Category, 'id' | 'createdAt' | 'color'> & { color?: string }) => {
+        let finalColor = category.color;
+
+        // Auto-assign color if not provided
+        if (!finalColor) {
+            finalColor = getCategoryColor(nextColorIndex);
+            setNextColorIndex(prev => prev + 1);
+        }
+
         const newCategory: Category = {
             ...category,
+            color: finalColor,
             id: generateUUID(),
             createdAt: Date.now(),
         };
         setCategories(prev => [...prev, newCategory]);
-    }, []);
+    }, [nextColorIndex]);
 
     const updateCategory = useCallback((id: string, updates: Partial<Omit<Category, 'id' | 'createdAt'>>) => {
         setCategories(prev => prev.map(cat =>
@@ -212,6 +224,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         updateCategory,
         deleteCategory,
         getCategoryById,
+        nextColorIndex,
         transactions,
         addTransaction,
         updateTransaction,
@@ -226,6 +239,7 @@ export function BudgetProvider({ children }: { children: ReactNode }) {
         updateCategory,
         deleteCategory,
         getCategoryById,
+        nextColorIndex,
         transactions,
         addTransaction,
         updateTransaction,
