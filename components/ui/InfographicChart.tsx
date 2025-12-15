@@ -416,7 +416,6 @@ function InfographicChartInner({
                             <AnimatedSlice
                                 key={getStableKey(slice.data, index)}
                                 slice={slice}
-                                index={index}
                                 gradientId={`gradient-${getStableKey(slice.data, index)}`}
                                 isSelected={selectedIndex === index}
                                 isOtherSelected={selectedIndex !== null && selectedIndex !== index}
@@ -440,7 +439,11 @@ function InfographicChartInner({
                 {showIcons && slices.map((slice, index) => {
                     if (slice.percentage < MIN_ICON_PERCENTAGE) return null;
                     return (
-                        <AnimatedView key={`icon-wrapper-${getStableKey(slice.data, index)}`} style={contentOpacityStyle} pointerEvents="none">
+                        <AnimatedView
+                            key={`icon-wrapper-${getStableKey(slice.data, index)}`}
+                            style={[StyleSheet.absoluteFill, contentOpacityStyle]}
+                            pointerEvents="box-none"
+                        >
                             <AnimatedIcon
                                 key={`icon-${getStableKey(slice.data, index)}`}
                                 slice={slice}

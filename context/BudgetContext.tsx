@@ -71,7 +71,23 @@ const DEFAULT_CATEGORIES: Omit<Category, 'id' | 'createdAt'>[] = [
     { name: 'Shopping', icon: 'bag-handle-outline', color: getCategoryColor(3) },
     { name: 'Coffee', icon: 'cafe-outline', color: getCategoryColor(4) },
     { name: 'Entertainment', icon: 'game-controller-outline', color: getCategoryColor(5) },
+    { name: 'Dining', icon: 'restaurant-outline', color: getCategoryColor(6) },
+    { name: 'Utilities', icon: 'flash-outline', color: getCategoryColor(7) },
+    { name: 'Subscriptions', icon: 'tv-outline', color: getCategoryColor(8) },
+    { name: 'Education', icon: 'school-outline', color: getCategoryColor(9) },
+    { name: 'Travel', icon: 'airplane-outline', color: getCategoryColor(10) },
+    { name: 'Pets', icon: 'paw-outline', color: getCategoryColor(11) },
+    { name: 'Gifts', icon: 'gift-outline', color: getCategoryColor(12) },
+    { name: 'Insurance', icon: 'shield-checkmark-outline', color: getCategoryColor(13) },
+    { name: 'Home', icon: 'home-outline', color: getCategoryColor(14) },
 ];
+
+// Helper to get date string
+function getDateOffset(daysAgo: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    return d.toISOString().split('T')[0];
+}
 
 // ============================================================================
 // UUID GENERATION (Cryptographically Secure)
@@ -85,21 +101,75 @@ function generateUUID(): string {
 // PROVIDER
 // ============================================================================
 
+// Pre-generate category IDs to share between categories and test transactions
+const SEEDED_CATEGORY_IDS = DEFAULT_CATEGORIES.map(() => generateUUID());
+
+function createSeededCategories(): Category[] {
+    return DEFAULT_CATEGORIES.map((cat, index) => ({
+        ...cat,
+        id: SEEDED_CATEGORY_IDS[index],
+        createdAt: Date.now() + index,
+    }));
+}
+
+function createTestTransactions(): Transaction[] {
+    const catIds = SEEDED_CATEGORY_IDS;
+
+    const testTransactions: Omit<Transaction, 'id' | 'createdAt'>[] = [
+        // Today (0)
+        { title: 'Whole Foods', amount: -87.50, date: getDateOffset(0), categoryId: catIds[0], note: 'Weekly groceries' },
+        { title: 'Starbucks', amount: -6.75, date: getDateOffset(0), categoryId: catIds[4] },
+        { title: 'Uber Ride', amount: -24.00, date: getDateOffset(0), categoryId: catIds[2] },
+        { title: 'Netflix', amount: -15.99, date: getDateOffset(0), categoryId: catIds[8] },
+
+        // Yesterday (1)
+        { title: 'Gym Membership', amount: -49.99, date: getDateOffset(1), categoryId: catIds[1] },
+        { title: 'Amazon Purchase', amount: -156.00, date: getDateOffset(1), categoryId: catIds[3] },
+        { title: 'Chipotle', amount: -12.50, date: getDateOffset(1), categoryId: catIds[6] },
+
+        // 2 days ago
+        { title: 'Electric Bill', amount: -120.00, date: getDateOffset(2), categoryId: catIds[7] },
+        { title: 'Spotify', amount: -9.99, date: getDateOffset(2), categoryId: catIds[8] },
+        { title: 'Gas Station', amount: -45.00, date: getDateOffset(2), categoryId: catIds[2] },
+
+        // 3 days ago
+        { title: 'Pet Food', amount: -38.00, date: getDateOffset(3), categoryId: catIds[11] },
+        { title: 'Movie Tickets', amount: -28.00, date: getDateOffset(3), categoryId: catIds[5] },
+        { title: 'Books', amount: -42.00, date: getDateOffset(3), categoryId: catIds[9] },
+
+        // 4 days ago
+        { title: 'Flight Booking', amount: -320.00, date: getDateOffset(4), categoryId: catIds[10] },
+        { title: 'Birthday Gift', amount: -75.00, date: getDateOffset(4), categoryId: catIds[12] },
+
+        // 5 days ago
+        { title: 'Car Insurance', amount: -180.00, date: getDateOffset(5), categoryId: catIds[13] },
+        { title: 'Home Depot', amount: -95.00, date: getDateOffset(5), categoryId: catIds[14] },
+        { title: 'Trader Joes', amount: -65.00, date: getDateOffset(5), categoryId: catIds[0] },
+
+        // 6 days ago
+        { title: 'Coffee Beans', amount: -22.00, date: getDateOffset(6), categoryId: catIds[4] },
+        { title: 'Pharmacy', amount: -35.00, date: getDateOffset(6), categoryId: catIds[1] },
+        { title: 'Pizza Delivery', amount: -32.00, date: getDateOffset(6), categoryId: catIds[6] },
+
+        // 7 days ago
+        { title: 'Video Games', amount: -59.99, date: getDateOffset(7), categoryId: catIds[5] },
+        { title: 'Costco', amount: -210.00, date: getDateOffset(7), categoryId: catIds[0] },
+        { title: 'Vet Visit', amount: -120.00, date: getDateOffset(7), categoryId: catIds[11] },
+        { title: 'Online Course', amount: -199.00, date: getDateOffset(7), categoryId: catIds[9] },
+    ];
+
+    return testTransactions.map((tx, index) => ({
+        ...tx,
+        id: generateUUID(),
+        createdAt: Date.now() - index * 1000,
+    }));
+}
+
 export function BudgetProvider({ children }: { children: ReactNode }) {
-    const [budget, setBudget] = useState(3000);
-
-    // Initialize categories with defaults (seeded with proper UUIDs)
-    const [categories, setCategories] = useState<Category[]>(() => {
-        return DEFAULT_CATEGORIES.map((cat, index) => ({
-            ...cat,
-            id: generateUUID(),
-            createdAt: Date.now() + index, // Ensure unique timestamps
-        }));
-    });
-
+    const [budget, setBudget] = useState(5000);
+    const [categories, setCategories] = useState<Category[]>(createSeededCategories);
     const [nextColorIndex, setNextColorIndex] = useState(DEFAULT_CATEGORIES.length);
-
-    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [transactions, setTransactions] = useState<Transaction[]>(createTestTransactions);
 
     // ========================================================================
     // CATEGORY OPERATIONS
