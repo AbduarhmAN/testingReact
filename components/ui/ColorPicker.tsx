@@ -1,14 +1,23 @@
 import { CATEGORY_COLORS } from '@/constants/theme';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 
-type ColorPickerProps = {
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface ColorPickerProps {
     selectedColor: string;
     onSelectColor: (color: string) => void;
-};
+    disabled?: boolean;
+}
 
-export function ColorPicker({ selectedColor, onSelectColor }: ColorPickerProps) {
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
+export function ColorPicker({ selectedColor, onSelectColor, disabled = false }: ColorPickerProps) {
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, disabled && styles.containerDisabled]}>
             {CATEGORY_COLORS.map((color, index) => (
                 <TouchableOpacity
                     key={index}
@@ -16,8 +25,11 @@ export function ColorPicker({ selectedColor, onSelectColor }: ColorPickerProps) 
                         styles.colorCircle,
                         { backgroundColor: color },
                         selectedColor === color && styles.selected,
+                        disabled && styles.colorCircleDisabled,
                     ]}
                     onPress={() => onSelectColor(color)}
+                    disabled={disabled}
+                    activeOpacity={disabled ? 1 : 0.7}
                 >
                     {selectedColor === color && (
                         <View style={styles.checkmark} />
@@ -28,6 +40,10 @@ export function ColorPicker({ selectedColor, onSelectColor }: ColorPickerProps) 
     );
 }
 
+// ============================================================================
+// STYLES
+// ============================================================================
+
 const styles = StyleSheet.create({
     container: {
         flexDirection: 'row',
@@ -36,12 +52,18 @@ const styles = StyleSheet.create({
         gap: 10,
         paddingVertical: 16,
     },
+    containerDisabled: {
+        opacity: 0.6,
+    },
     colorCircle: {
         width: 40,
         height: 40,
         borderRadius: 20,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    colorCircleDisabled: {
+        transform: [{ scale: 0.95 }],
     },
     selected: {
         borderWidth: 3,

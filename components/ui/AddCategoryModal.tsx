@@ -52,6 +52,9 @@ export function AddCategoryModal({ visible, onClose }: AddCategoryModalProps) {
     // Track if component is mounted to prevent state updates after unmount
     const isMountedRef = useRef(true);
 
+    // Store the initial default color when modal opens (prevents recalculation issue)
+    const initialDefaultColorRef = useRef<string>('');
+
     // ========================================================================
     // DERIVED STATE
     // ========================================================================
@@ -74,10 +77,13 @@ export function AddCategoryModal({ visible, onClose }: AddCategoryModalProps) {
     // Reset form when modal opens (using FRESH nextColorIndex from context)
     useEffect(() => {
         if (visible) {
-            // Read nextColorIndex directly from context (not stale prop)
+            // Capture the default color at modal open time (prevents recalculation issue)
+            const freshColor = getCategoryColor(nextColorIndex);
+            initialDefaultColorRef.current = freshColor;
+
             setName('');
             setSelectedIcon(DEFAULT_ICON);
-            setSelectedColor(getCategoryColor(nextColorIndex));
+            setSelectedColor(freshColor);
             setError('');
             setIsSubmitting(false);
         }
@@ -118,7 +124,9 @@ export function AddCategoryModal({ visible, onClose }: AddCategoryModalProps) {
         setIsSubmitting(true);
 
         // Determine if user selected a custom color or using default
-        const isUsingDefaultColor = selectedColor === defaultColor;
+        // Compare against the initial default color captured when modal opened
+        // This prevents issues if context updates mid-form
+        const isUsingDefaultColor = selectedColor === initialDefaultColorRef.current;
 
         // Add category (context handles UUID and color fallback)
         addCategory({
@@ -241,7 +249,11 @@ export function AddCategoryModal({ visible, onClose }: AddCategoryModalProps) {
 
                         {/* Color Selection */}
                         <Text style={[styles.label, { color: theme.textSecondary }]}>COLOR</Text>
-                        <ColorPicker selectedColor={selectedColor} onSelectColor={setSelectedColor} />
+                        <ColorPicker
+                            selectedColor={selectedColor}
+                            onSelectColor={setSelectedColor}
+                            disabled={isSubmitting}
+                        />
 
                         {/* Preview */}
                         <Text style={[styles.label, { color: theme.textSecondary }]}>PREVIEW</Text>
