@@ -118,7 +118,6 @@ export function BudgetHeader({ monthlyBudget, totalSpent, categoryBreakdown, onT
                         {chartData.length > 0 ? (
                             <InfographicChart
                                 data={chartData}
-                                totalSpent={totalSpent}
                                 size={Math.max(140, 260 - scrollY * 1.2)}
                                 selectedIndex={selectedCategory}
                                 onSelectCategory={setSelectedCategory}
